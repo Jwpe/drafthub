@@ -20,63 +20,100 @@ def slugify(doc_name):
     doc_name = re.sub('[^\w\s-]', '', doc_name).strip().lower()
     return re.sub('[-\s]+', '_', doc_name)
 
-def sync():
+def get_docs():
 
     docs_uri = DRAFT_URI + 'documents.json'
 
     draft_resp = requests.get(docs_uri, auth=(DRAFT_USERNAME, DRAFT_PASSWORD))
-
     draft_resp.raise_for_status()
 
-    documents = draft_resp.json()
+    return draft_resp.json()
 
-    repo_uri = "/".join([GITHUB_URI, 'repos', 'Jwpe', 'draft-posts'])
+def get_contents_uri(repository):
 
-    contents_uri = "/".join([repo_uri, 'contents'])
+    repo_uri = "/".join([GITHUB_URI, 'repos', GITHUB_USERNAME, repository])
+    return "/".join([repo_uri, 'contents'])
 
-    github_resp = requests.get(contents_uri, auth=(GITHUB_USERNAME, GITHUB_PASSWORD))
+def get_dir(repository, directory=''):
 
-    github_resp.raise_for_status()
+    uri = get_contents_uri(repository)
+    if directory:
+        uri = "/".join([uri, directory])
+    response = requests.get(uri, auth=(GITHUB_USERNAME, GITHUB_PASSWORD))
 
-    repo_contents = github_resp.json()
-    slug_names = [item.get('name') for item in repo_contents]
-    sha_map = {item['name']:item['sha'] for item in repo_contents}
+    # If the directory does not exist, treat it as empty
+    if response.status_code == 404:
+        return []
+
+    response.raise_for_status()
+    return response.json()
+
+def update_file(data, file_name, ext, path=''):
+
+    if path:
+        file_path = '/'.join([get_contents_uri('draft-posts'), path])
+    else:
+        file_path = get_contents_uri('draft-posts')
+
+    uri = '/'.join([file_path, file_name + ext])
+
+    print uri
+    response = requests.put(
+        uri, json.dumps(data), auth=(GITHUB_USERNAME, GITHUB_PASSWORD))
+
+    print response.json()
+
+    response.raise_for_status()
+    return response
+
+def get_filename(file_path):
+    return os.path.splitext(file_path)[0]
+
+def sha_map(dir_contents):
+    return {get_filename(item['name']):item['sha'] for item in dir_contents}
+
+def sync():
+
+    documents = get_docs()
+    source_contents = get_dir('draft-posts', 'source')
+    html_contents = get_dir('draft-posts', 'html')
+
+    source_sha_map = sha_map(source_contents)
+    html_sha_map = sha_map(html_contents)
+
+    slug_names = [get_filename(item.get('name')) for item in source_contents]
 
     for document in documents:
         doc_name = document.get('name')
         doc_timestamp = document.get('updated_at')
 
         if doc_name:
-            slug_name = slugify(doc_name) + '.md'
+            slug_name = slugify(doc_name)
+            source = document.get('content').encode('utf-8')
+            html = document.get('content_html').encode('utf-8')
 
-            # Bloody unicode
-            try:
-                encoded_data = base64.b64encode(document.get('content'))
-            except UnicodeEncodeError:
-                continue
-
-            data = {
-                'content': encoded_data,
-            }
+            source_data = {'content': base64.b64encode(source)}
+            html_data = {'content': base64.b64encode(html)}
 
             if slug_name in slug_names:
                 # If the file already exists we need to provide the SHA
-                message_verb = "Updated"
-                data['sha'] = sha_map.get(slug_name)
+                message_verb = 'Updated'
+                source_data['sha'] = source_sha_map.get(slug_name)
+                html_data['sha'] = html_sha_map.get(slug_name)
             else:
-                message_verb = "Created"
+                message_verb = 'Created'
 
-            data['message'] = "{} {} at {}".format(message_verb, doc_name,
-                doc_timestamp)
+            message = '{verb} {name} at {timestamp}'.format(verb=message_verb,
+                name=doc_name, timestamp=doc_timestamp)
 
-            github_doc_uri = "/".join([contents_uri, slug_name])
+            source_data['message'] = message + ' (MD)'
+            html_data['message'] = message + ' (HTML)'
 
-            # Put request to github
-            response = requests.put(github_doc_uri, json.dumps(data), auth=(GITHUB_USERNAME, GITHUB_PASSWORD))
+            update_file(source_data, slug_name, '.md', 'source')
+            update_file(html_data, slug_name, '.html', 'html')
 
-            response.raise_for_status()
-
-            print data['message']
+            print source_data['message']
+            print html_data['message']
 
 if __name__ == '__main__':
     sync()
