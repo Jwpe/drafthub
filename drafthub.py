@@ -3,6 +3,7 @@ import os
 import re
 import base64
 import json
+import time
 
 DRAFT_USERNAME = os.environ.get('DRAFT_USERNAME')
 DRAFT_PASSWORD = os.environ.get('DRAFT_PASSWORD')
@@ -57,13 +58,13 @@ def update_file(data, file_name, ext, path=''):
 
     uri = '/'.join([file_path, file_name + ext])
 
-    print uri
     response = requests.put(
         uri, json.dumps(data), auth=(GITHUB_USERNAME, GITHUB_PASSWORD))
-
-    print response.json()
-
     response.raise_for_status()
+
+    # Avoid race conditions with github's contents API
+    time.sleep(1)
+
     return response
 
 def get_filename(file_path):
