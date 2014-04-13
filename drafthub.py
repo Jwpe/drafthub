@@ -1,4 +1,5 @@
 import requests
+import sys
 import os
 import re
 import base64
@@ -49,12 +50,12 @@ def get_dir(repository, directory=''):
     response.raise_for_status()
     return response.json()
 
-def update_file(data, file_name, ext, path=''):
+def update_file(data, repo_name, file_name, ext, path=''):
 
     if path:
-        file_path = '/'.join([get_contents_uri('draft-posts'), path])
+        file_path = '/'.join([get_contents_uri(repo_name), path])
     else:
-        file_path = get_contents_uri('draft-posts')
+        file_path = get_contents_uri(repo_name)
 
     uri = '/'.join([file_path, file_name + ext])
 
@@ -75,9 +76,15 @@ def sha_map(dir_contents):
 
 def sync():
 
+    try:
+        repo_name = sys.argv[1]
+    except IndexError:
+        print "Error: Please enter a repository name, e.g. python drafthub.py <repo_name>."
+        return
+
     documents = get_docs()
-    source_contents = get_dir('draft-posts', 'source')
-    html_contents = get_dir('draft-posts', 'html')
+    source_contents = get_dir(repo_name, 'source')
+    html_contents = get_dir(repo_name, 'html')
 
     source_sha_map = sha_map(source_contents)
     html_sha_map = sha_map(html_contents)
@@ -110,8 +117,8 @@ def sync():
             source_data['message'] = message + ' (MD)'
             html_data['message'] = message + ' (HTML)'
 
-            update_file(source_data, slug_name, '.md', 'source')
-            update_file(html_data, slug_name, '.html', 'html')
+            update_file(source_data, repo_name, slug_name, '.md', 'source')
+            update_file(html_data, repo_name, slug_name, '.html', 'html')
 
             print source_data['message']
             print html_data['message']
